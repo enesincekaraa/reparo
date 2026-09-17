@@ -1,0 +1,31 @@
+
+
+### İşletme oluştur — beklenen: 201 Created
+POST http://localhost:8080/api/v1/businesses
+Content-Type: application/json
+
+{
+  "name": "Deniz Bilgisayar"
+}
+
+### Boş işletme adı — beklenen: 400 Bad Request
+POST http://localhost:8080/api/v1/businesses
+Content-Type: application/json
+
+{
+  "name": "   "
+}
+
+
+###
+@businessId=aa38a347-93e8-418d-ac2b-055ff0e57e7e
+
+
+
+### İşletmeyi kimliğiyle getir — 200 OK
+GET http://localhost:8080/api/v1/businesses/{{businessId}}
+Accept: application/json
+
+### Olmayan işletme — 404 Not Found
+GET http://localhost:8080/api/v1/businesses/cf185839-ec3e-4428-8f11-ae15d21106f9
+Accept: application/json
