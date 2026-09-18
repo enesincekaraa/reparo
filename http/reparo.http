@@ -229,3 +229,234 @@ Accept: application/problem+json
             "Unexpected error code: " + response.body.code);
     });
 %}
+
+### =========================================================
+### 11. Aynı işletmede ikinci müşteri oluştur
+### Cihazın başka müşteriden gizlendiğini test edeceğiz.
+### =========================================================
+
+POST {{baseUrl}}/api/v1/businesses/{{businessId}}/customers
+Content-Type: application/json
+Accept: application/json
+
+{
+  "fullName": "Ayşe Yılmaz",
+  "phoneNumber": "+905551112244"
+}
+
+> {%
+    client.test("Second customer is created", function () {
+        client.assert(response.status === 201,
+            "Expected 201 but received " + response.status);
+    });
+
+    client.global.set("secondCustomerId", response.body.id);
+%}
+
+
+### =========================================================
+### 12. İkinci işletmeye müşteri oluştur
+### Cross-tenant cihaz erişimi için kullanılacak.
+### =========================================================
+
+POST {{baseUrl}}/api/v1/businesses/{{otherBusinessId}}/customers
+Content-Type: application/json
+Accept: application/json
+
+{
+  "fullName": "Mehmet Kaya",
+  "phoneNumber": "+905551112255"
+}
+
+> {%
+    client.test("Other business customer is created", function () {
+        client.assert(response.status === 201,
+            "Expected 201 but received " + response.status);
+        client.assert(
+            response.body.businessId === client.global.get("otherBusinessId"),
+            "Customer must belong to the other business"
+        );
+    });
+
+    client.global.set("otherCustomerId", response.body.id);
+%}
+
+
+### =========================================================
+### 13. İlk müşteriye cihaz kaydet
+### Beklenen: 201 Created
+### =========================================================
+
+POST {{baseUrl}}/api/v1/businesses/{{businessId}}/customers/{{customerId}}/devices
+Content-Type: application/json
+Accept: application/json
+
+{
+  "type": "laptop",
+  "brand": "  Apple  ",
+  "model": "  MacBook Air M4  ",
+  "serialNumber": "  C02-REPARO-123  "
+}
+
+> {%
+    client.test("Device is created", function () {
+        client.assert(response.status === 201,
+            "Expected 201 but received " + response.status);
+        client.assert(response.body.id !== null,
+            "Device id must be present");
+        client.assert(response.body.type === "LAPTOP",
+            "Device type must be normalized");
+        client.assert(response.body.brand === "Apple",
+            "Device brand must be normalized");
+        client.assert(
+            response.body.businessId === client.global.get("businessId"),
+            "Unexpected business id"
+        );
+        client.assert(
+            response.body.customerId === client.global.get("customerId"),
+            "Unexpected customer id"
+        );
+    });
+
+    client.global.set("deviceId", response.body.id);
+%}
+
+
+### =========================================================
+### 14. Cihazı doğru işletme ve müşteri kapsamında getir
+### Beklenen: 200 OK
+### =========================================================
+
+GET {{baseUrl}}/api/v1/businesses/{{businessId}}/customers/{{customerId}}/devices/{{deviceId}}
+Accept: application/json
+
+> {%
+    client.test("Device is visible in correct scope", function () {
+        client.assert(response.status === 200,
+            "Expected 200 but received " + response.status);
+        client.assert(
+            response.body.id === client.global.get("deviceId"),
+            "Unexpected device id"
+        );
+        client.assert(response.body.brand === "Apple",
+            "Unexpected device brand");
+    });
+%}
+
+
+### =========================================================
+### 15. Desteklenmeyen cihaz tipi
+### Beklenen: 400 INVALID_DEVICE
+### =========================================================
+
+POST {{baseUrl}}/api/v1/businesses/{{businessId}}/customers/{{customerId}}/devices
+Content-Type: application/json
+Accept: application/problem+json
+
+{
+  "type": "TOASTER",
+  "brand": "Example",
+  "model": null,
+  "serialNumber": null
+}
+
+> {%
+    client.test("Unsupported device type is rejected", function () {
+        client.assert(response.status === 400,
+            "Expected 400 but received " + response.status);
+        client.assert(response.body.code === "INVALID_DEVICE",
+            "Unexpected error code: " + response.body.code);
+        client.assert(response.body.field === "type",
+            "Error field must be type");
+    });
+%}
+
+
+### =========================================================
+### 16. Boş marka
+### Beklenen: 400 INVALID_DEVICE
+### =========================================================
+
+POST {{baseUrl}}/api/v1/businesses/{{businessId}}/customers/{{customerId}}/devices
+Content-Type: application/json
+Accept: application/problem+json
+
+{
+  "type": "PHONE",
+  "brand": "   ",
+  "model": "iPhone",
+  "serialNumber": null
+}
+
+> {%
+    client.test("Blank device brand is rejected", function () {
+        client.assert(response.status === 400,
+            "Expected 400 but received " + response.status);
+        client.assert(response.body.code === "INVALID_DEVICE",
+            "Unexpected error code: " + response.body.code);
+        client.assert(response.body.field === "brand",
+            "Error field must be brand");
+    });
+%}
+
+
+### =========================================================
+### 17. Olmayan müşteriye cihaz kaydet
+### Beklenen: 404 CUSTOMER_NOT_FOUND
+### =========================================================
+
+POST {{baseUrl}}/api/v1/businesses/{{businessId}}/customers/00000000-0000-0000-0000-000000000003/devices
+Content-Type: application/json
+Accept: application/problem+json
+
+{
+  "type": "PHONE",
+  "brand": "Samsung",
+  "model": "Galaxy S26",
+  "serialNumber": null
+}
+
+> {%
+    client.test("Missing customer is rejected", function () {
+        client.assert(response.status === 404,
+            "Expected 404 but received " + response.status);
+        client.assert(response.body.code === "CUSTOMER_NOT_FOUND",
+            "Unexpected error code: " + response.body.code);
+    });
+%}
+
+
+### =========================================================
+### 18. Başka işletmeden cihaza eriş
+### Beklenen: 404 DEVICE_NOT_FOUND
+### =========================================================
+
+GET {{baseUrl}}/api/v1/businesses/{{otherBusinessId}}/customers/{{otherCustomerId}}/devices/{{deviceId}}
+Accept: application/problem+json
+
+> {%
+    client.test("Device is hidden from another business", function () {
+        client.assert(response.status === 404,
+            "Expected 404 but received " + response.status);
+        client.assert(response.body.code === "DEVICE_NOT_FOUND",
+            "Unexpected error code: " + response.body.code);
+    });
+%}
+
+
+### =========================================================
+### 19. Aynı işletmedeki başka müşteriden cihaza eriş
+### Beklenen: 404 DEVICE_NOT_FOUND
+### =========================================================
+
+GET {{baseUrl}}/api/v1/businesses/{{businessId}}/customers/{{secondCustomerId}}/devices/{{deviceId}}
+Accept: application/problem+json
+
+> {%
+    client.test("Device is hidden from another customer", function () {
+        client.assert(response.status === 404,
+            "Expected 404 but received " + response.status);
+        client.assert(response.body.code === "DEVICE_NOT_FOUND",
+            "Unexpected error code: " + response.body.code);
+    });
+%}
