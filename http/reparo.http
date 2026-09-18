@@ -1,0 +1,231 @@
+@baseUrl = http://localhost:8080
+
+### =========================================================
+### 1. Uygulama sağlık kontrolü
+### Beklenen: 200 OK
+### =========================================================
+
+GET {{baseUrl}}/actuator/health
+Accept: application/json
+
+> {%
+    client.test("Application is healthy", function () {
+        client.assert(response.status === 200,
+            "Expected 200 but received " + response.status);
+        client.assert(response.body.status === "UP",
+            "Application status must be UP");
+    });
+%}
+
+
+### =========================================================
+### 2. Birinci işletmeyi oluştur
+### Bu işletme müşterinin sahibi olacak.
+### Beklenen: 201 Created
+### =========================================================
+
+POST {{baseUrl}}/api/v1/businesses
+Content-Type: application/json
+Accept: application/json
+
+{
+  "name": "Deniz Bilgisayar"
+}
+
+> {%
+    client.test("First business is created", function () {
+        client.assert(response.status === 201,
+            "Expected 201 but received " + response.status);
+        client.assert(response.body.id !== null,
+            "Business id must be present");
+        client.assert(response.body.name === "Deniz Bilgisayar",
+            "Unexpected business name");
+    });
+
+    client.global.set("businessId", response.body.id);
+%}
+
+
+### =========================================================
+### 3. İkinci işletmeyi oluştur
+### Tenant izolasyonu testinde kullanılacak.
+### Beklenen: 201 Created
+### =========================================================
+
+POST {{baseUrl}}/api/v1/businesses
+Content-Type: application/json
+Accept: application/json
+
+{
+  "name": "Mavi Teknik"
+}
+
+> {%
+    client.test("Second business is created", function () {
+        client.assert(response.status === 201,
+            "Expected 201 but received " + response.status);
+    });
+
+    client.global.set("otherBusinessId", response.body.id);
+%}
+
+
+### =========================================================
+### 4. Birinci işletmeye müşteri kaydet
+### Beklenen: 201 Created
+### =========================================================
+
+POST {{baseUrl}}/api/v1/businesses/{{businessId}}/customers
+Content-Type: application/json
+Accept: application/json
+
+{
+  "fullName": "  Enes İncekara  ",
+  "phoneNumber": "+905551112233"
+}
+
+> {%
+    client.test("Customer is created", function () {
+        client.assert(response.status === 201,
+            "Expected 201 but received " + response.status);
+        client.assert(response.body.id !== null,
+            "Customer id must be present");
+        client.assert(response.body.businessId === client.global.get("businessId"),
+            "Customer must belong to the requested business");
+        client.assert(response.body.fullName === "Enes İncekara",
+            "Customer name must be normalized");
+        client.assert(response.body.phoneNumber === "+905551112233",
+            "Unexpected phone number");
+    });
+
+    client.global.set("customerId", response.body.id);
+%}
+
+
+### =========================================================
+### 5. Müşteriyi kendi işletmesi üzerinden getir
+### Beklenen: 200 OK
+### =========================================================
+
+GET {{baseUrl}}/api/v1/businesses/{{businessId}}/customers/{{customerId}}
+Accept: application/json
+
+> {%
+    client.test("Customer is visible inside its own business", function () {
+        client.assert(response.status === 200,
+            "Expected 200 but received " + response.status);
+        client.assert(response.body.id === client.global.get("customerId"),
+            "Unexpected customer id");
+        client.assert(response.body.businessId === client.global.get("businessId"),
+            "Unexpected business id");
+    });
+%}
+
+
+### =========================================================
+### 6. Boş müşteri adı
+### Beklenen: 400 INVALID_CUSTOMER_NAME
+### =========================================================
+
+POST {{baseUrl}}/api/v1/businesses/{{businessId}}/customers
+Content-Type: application/json
+Accept: application/problem+json
+
+{
+  "fullName": "   ",
+  "phoneNumber": "+905551112233"
+}
+
+> {%
+    client.test("Blank customer name is rejected", function () {
+        client.assert(response.status === 400,
+            "Expected 400 but received " + response.status);
+        client.assert(response.body.code === "INVALID_CUSTOMER_NAME",
+            "Unexpected error code: " + response.body.code);
+    });
+%}
+
+
+### =========================================================
+### 7. Geçersiz telefon numarası
+### Beklenen: 400 INVALID_PHONE_NUMBER
+### =========================================================
+
+POST {{baseUrl}}/api/v1/businesses/{{businessId}}/customers
+Content-Type: application/json
+Accept: application/problem+json
+
+{
+  "fullName": "Enes İncekara",
+  "phoneNumber": "0555 111 22 33"
+}
+
+> {%
+    client.test("Invalid phone number is rejected", function () {
+        client.assert(response.status === 400,
+            "Expected 400 but received " + response.status);
+        client.assert(response.body.code === "INVALID_PHONE_NUMBER",
+            "Unexpected error code: " + response.body.code);
+    });
+%}
+
+
+### =========================================================
+### 8. Olmayan işletmeye müşteri kaydet
+### Beklenen: 404 BUSINESS_NOT_FOUND
+### =========================================================
+
+POST {{baseUrl}}/api/v1/businesses/00000000-0000-0000-0000-000000000001/customers
+Content-Type: application/json
+Accept: application/problem+json
+
+{
+  "fullName": "Enes İncekara",
+  "phoneNumber": "+905551112233"
+}
+
+> {%
+    client.test("Missing business is rejected", function () {
+        client.assert(response.status === 404,
+            "Expected 404 but received " + response.status);
+        client.assert(response.body.code === "BUSINESS_NOT_FOUND",
+            "Unexpected error code: " + response.body.code);
+    });
+%}
+
+
+### =========================================================
+### 9. Başka işletmenin müşterisine erişmeye çalış
+### Kritik tenant izolasyonu testi
+### Beklenen: 404 CUSTOMER_NOT_FOUND
+### =========================================================
+
+GET {{baseUrl}}/api/v1/businesses/{{otherBusinessId}}/customers/{{customerId}}
+Accept: application/problem+json
+
+> {%
+    client.test("Customer is hidden from another business", function () {
+        client.assert(response.status === 404,
+            "Expected 404 but received " + response.status);
+        client.assert(response.body.code === "CUSTOMER_NOT_FOUND",
+            "Unexpected error code: " + response.body.code);
+    });
+%}
+
+
+### =========================================================
+### 10. Gerçekte olmayan müşteriyi getir
+### Beklenen: 404 CUSTOMER_NOT_FOUND
+### =========================================================
+
+GET {{baseUrl}}/api/v1/businesses/{{businessId}}/customers/00000000-0000-0000-0000-000000000002
+Accept: application/problem+json
+
+> {%
+    client.test("Missing customer returns not found", function () {
+        client.assert(response.status === 404,
+            "Expected 404 but received " + response.status);
+        client.assert(response.body.code === "CUSTOMER_NOT_FOUND",
+            "Unexpected error code: " + response.body.code);
+    });
+%}
